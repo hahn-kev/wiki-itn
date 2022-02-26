@@ -1,14 +1,14 @@
 extern crate core;
 
 use std::collections::HashMap;
-
 use std::io::{Read, stdin};
-use chrono::{SecondsFormat, Utc};
+
+use chrono::{Duration, SecondsFormat, Utc};
 use html_parser::{Dom, Element, Node};
 
-mod news_item;
+use news_item::NewsItem;
 
-use news_item::{NewsItem};
+mod news_item;
 
 fn main() {
     process();
@@ -35,11 +35,12 @@ fn process() {
 }
 
 fn write_atom_feed(list: Vec<NewsItem>) -> String {
-    let time = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+    let mut time = Utc::now();
 
     let mut entries = String::new();
     for NewsItem { title, body, url, id } in list {
-
+        time = time + Duration::seconds(-1);
+        let time = time.to_rfc3339_opts(SecondsFormat::Secs, true);
         entries.push_str(&format!(r#"
     <entry>
         <title>{title}</title>
@@ -50,6 +51,8 @@ fn write_atom_feed(list: Vec<NewsItem>) -> String {
         <content type="xhtml">{body}</content>
     </entry>"#));
     }
+
+    let time = time.to_rfc3339_opts(SecondsFormat::Secs, true);
     return format!(r##"<?xml version="#1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
     <title>Wikipedia In The News</title>
@@ -59,7 +62,6 @@ fn write_atom_feed(list: Vec<NewsItem>) -> String {
 </feed>
 "##);
 }
-
 
 
 fn element_to_news_item(e: &Element) -> NewsItem {
