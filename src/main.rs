@@ -78,12 +78,12 @@ fn element_to_news_item(e: &Element) -> NewsItem {
     let id = link.clone();
     link.insert_str(0, URL_PREFIX);
 
-    return NewsItem {
+    NewsItem {
         title,
-        body: element_children_to_string(&e),
+        body: element_children_to_string(e),
         url: link,
         id,
-    };
+    }
 }
 
 fn element_children_to_string(e: &Element) -> String {
@@ -97,7 +97,7 @@ fn element_children_to_string(e: &Element) -> String {
             _ => {}
         }
     }
-    return str;
+    str
 }
 
 fn element_to_string(e: &Element) -> String {
@@ -113,7 +113,7 @@ fn attributes_to_string(attr: &HashMap<String, Option<String>>) -> String {
             None => format!(" {}", name)
         })
     });
-    return str;
+    str
 }
 
 fn find_root_element(dom: &Dom) -> Option<&Element> {
@@ -124,25 +124,26 @@ fn find_root_element(dom: &Dom) -> Option<&Element> {
             _ => continue
         }
     }
-    return None;
+    None
 }
 
-fn find_element_with_class<'a>(children: &'a Vec<Node>, element_name: &str, class: &String) -> Option<&'a Element> {
+#[allow(clippy::ptr_arg)]
+fn find_element_with_class<'a>(children: &'a [Node], element_name: &str, class: &String) -> Option<&'a Element> {
     for node in children {
         if let Node::Element(e) = node {
-            if e.name == element_name && e.classes.contains(class) { return Some(&e); }
+            if e.name == element_name && e.classes.contains(class) { return Some(e); }
             if let Some(e) = find_element_with_class(&e.children, element_name, class) { return Some(e); }
         }
     }
-    return None;
+    None
 }
 
-fn find_element<'a>(children: &'a Vec<Node>, element_name: &str) -> Option<&'a Element> {
+fn find_element<'a>(children: &'a [Node], element_name: &str) -> Option<&'a Element> {
     for node in children {
         if let Node::Element(e) = node {
             if e.name == element_name { return Some(e); }
             if let Some(e) = find_element(&e.children, element_name) { return Some(e); }
         }
     }
-    return None;
+    None
 }
