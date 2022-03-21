@@ -48,7 +48,7 @@ fn write_atom_feed(list: Vec<NewsItem>) -> String {
         <id>{id}</id>
         <published>{time}</published>
         <updated>{time}</updated>
-        <content type="xhtml">{body}</content>
+        <content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml">{body}</div></content>
     </entry>"#));
     }
 
