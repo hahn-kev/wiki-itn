@@ -117,8 +117,8 @@ fn attributes_to_string(attr: &HashMap<String, Option<String>>) -> String {
 }
 
 fn find_root_element(dom: &Dom) -> Option<&Element> {
-    let body_content = find_element_with_id(&dom.children, "div", "body_content")
-        .expect("unable to find div id='body_content'");
+    let body_content = find_element_with_id(&dom.children, "div", "bodyContent")
+        .expect("unable to find div id='bodyContent'");
     let div = find_element_with_class(&body_content.children, "div", &"mw-parser-output".to_string())
         .expect("unable to find div class='mw-parser-output'");
     for node in &div.children {
