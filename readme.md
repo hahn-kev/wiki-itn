@@ -1,4 +1,4 @@
-How to build for linux:
+How to build for linux (use WSL on windows):
 `cargo build -r`
 
 Test:
