@@ -53,7 +53,7 @@ fn write_atom_feed(list: Vec<NewsItem>) -> String {
     }
 
     let time = time.to_rfc3339_opts(SecondsFormat::Secs, true);
-    return format!(r##"<?xml version="#1.0" encoding="utf-8"?>
+    return format!(r##"<?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
     <title>Wikipedia In The News</title>
     <link href="{FEED_URL}"/>
