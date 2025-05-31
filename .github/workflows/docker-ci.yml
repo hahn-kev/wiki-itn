@@ -1,0 +1,143 @@
+name: Docker Build, Test, and Publish
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  # IMPORTANT: Please replace <OWNER> and <REPO_NAME> with your GitHub username/organization and repository name.
+  IMAGE_NAME: ghcr.io/<OWNER>/<REPO_NAME>
+
+jobs:
+  build:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    permissions: # Needed for pushing to GHCR
+      contents: read
+      packages: write
+      id-token: write # For OIDC if ever used with sigstore/cosign
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          # Add more tags based on git events if desired
+          # Example: type=schedule,pattern=nightly
+          # Example: type=ref,event=branch
+          # Example: type=ref,event=pr
+          # Example: type=semver,pattern={{version}}
+          # Example: type=sha
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  test:
+    name: Test Docker Image
+    runs-on: ubuntu-latest
+    needs: build # Ensures test runs after build is complete
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4 # May not be strictly necessary if not accessing local files for test setup
+
+      - name: Define image to test
+        id: image_info
+        run: |
+          # For PRs or non-main pushes, the image isn't pushed, so we can't easily pull by tag from GHCR.
+          # For main branch pushes, it's pushed and tagged as latest.
+          # This example assumes 'build' job always builds and makes image available locally or via a known tag for testing.
+          # A more robust way for PRs would be to load the image artifact or use a predictable SHA-based tag.
+          # For now, we'll construct a tag based on the SHA, assuming 'build' job tagged it this way and it's accessible.
+          # This relies on the 'build' job outputting tags including one like 'sha-<shortsha>'
+          # and that the image is available to the docker daemon in this job (e.g. if build job ran on same runner or pushed to a registry)
+          # A simpler approach if 'build' job *always* pushes to a dev registry or uses GHA cache effectively to share the image:
+          # For this example, we'll assume the image built with the SHA tag is available.
+          # The docker/metadata-action in the build job creates a tag like 'type=sha,prefix=sha-'
+          # Let's use the full SHA for more uniqueness if available, or latest for main branch.
+          if [ "${{ github.event_name }}" == "push" ] && [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "IMAGE_TO_TEST=${{ env.IMAGE_NAME }}:latest" >> $GITHUB_ENV
+            echo "Testing ${{ env.IMAGE_NAME }}:latest"
+          else
+            # For PRs or other branches, use the SHA-based tag.
+            # The metadata action produces tags like 'type=sha,prefix=sha-'
+            echo "IMAGE_TO_TEST=${{ env.IMAGE_NAME }}:sha-${GITHUB_SHA::7}" >> $GITHUB_ENV
+            echo "Testing ${{ env.IMAGE_NAME }}:sha-${GITHUB_SHA::7}"
+            echo "Note: This assumes the 'build' job has made this image tag available for testing (e.g., via local Docker daemon or a shared registry)."
+            echo "If testing PRs where image is not pushed, consider 'docker load' from an artifact or ensure runner persistence."
+          fi
+
+      - name: Run Docker container
+        run: |
+          docker run -d --name test-container ${{ env.IMAGE_TO_TEST }}
+          echo "Container started with image: ${{ env.IMAGE_TO_TEST }}"
+
+      - name: Wait for container initialization
+        run: |
+          echo "Waiting for container to initialize..."
+          sleep 30 # Allow Nginx, cron to start, and entrypoint to settle
+
+      - name: Manually trigger feed generation
+        run: |
+          echo "Manually triggering feed generation script..."
+          docker exec test-container /usr/local/bin/run_wiki_itn.sh
+          echo "Feed generation script executed."
+
+      - name: Wait for script execution and file creation
+        run: |
+          echo "Waiting for script to generate feed..."
+          sleep 10
+
+      - name: Check if feed.xml exists and is not empty
+        run: |
+          echo "Checking for feed.xml..."
+          docker exec test-container sh -c \
+            "if [ -s /var/www/html/feed.xml ]; then \
+              echo 'Test Passed: feed.xml exists and is not empty.'; \
+              echo 'feed.xml content:'; \
+              head /var/www/html/feed.xml; \
+              exit 0; \
+            else \
+              echo 'Test Failed: feed.xml does not exist or is empty.'; \
+              ls -l /var/www/html/; \
+              exit 1; \
+            fi"
+
+      - name: Stop and remove container
+        if: always() # Ensure cleanup even if previous steps fail
+        run: |
+          echo "Cleaning up container..."
+          docker logs test-container || echo "Failed to get logs, container might not have started."
+          docker stop test-container || echo "Failed to stop container."
+          docker rm test-container || echo "Failed to remove container."
