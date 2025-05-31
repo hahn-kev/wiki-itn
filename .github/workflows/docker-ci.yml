@@ -7,12 +7,11 @@ on:
     branches: [ master ]
 
 env:
-  # IMPORTANT: Please replace <OWNER> and <REPO_NAME> with your GitHub username/organization and repository name.
-  IMAGE_NAME: ghcr.io/hahn-kev/wiki-itn 
+  IMAGE_NAME: ghcr.io/hahn-kev/wiki-itn
 
 jobs:
-  build:
-    name: Build and Push Docker Image
+  build_and_test:
+    name: Build, Test, and Publish Docker Image
     runs-on: ubuntu-latest
     permissions: # Needed for pushing to GHCR
       contents: read
@@ -41,12 +40,6 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE_NAME }}
-          # Add more tags based on git events if desired
-          # Example: type=schedule,pattern=nightly
-          # Example: type=ref,event=branch
-          # Example: type=ref,event=pr
-          # Example: type=semver,pattern={{version}}
-          # Example: type=sha
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -54,54 +47,30 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
+        id: build_push # Added id to reference outputs if needed later
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          # Push is conditional: only on 'push' event to 'master' branch
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Outputs image digest and other info, useful if image is not pushed but needs to be loaded/used by a tag.
+          # For example, if push is false, we might need to load the image into docker for testing.
+          # build-push-action v5 automatically loads the image into the local Docker daemon if not pushed.
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  test:
-    name: Test Docker Image
-    runs-on: ubuntu-latest
-    needs: build # Ensures test runs after build is complete
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4 # May not be strictly necessary if not accessing local files for test setup
-
-      - name: Define image to test
-        id: image_info
-        run: |
-          # For PRs or non-main pushes, the image isn't pushed, so we can't easily pull by tag from GHCR.
-          # For main branch pushes, it's pushed and tagged as latest.
-          # This example assumes 'build' job always builds and makes image available locally or via a known tag for testing.
-          # A more robust way for PRs would be to load the image artifact or use a predictable SHA-based tag.
-          # For now, we'll construct a tag based on the SHA, assuming 'build' job tagged it this way and it's accessible.
-          # This relies on the 'build' job outputting tags including one like 'sha-<shortsha>'
-          # and that the image is available to the docker daemon in this job (e.g. if build job ran on same runner or pushed to a registry)
-          # A simpler approach if 'build' job *always* pushes to a dev registry or uses GHA cache effectively to share the image:
-          # For this example, we'll assume the image built with the SHA tag is available.
-          # The docker/metadata-action in the build job creates a tag like 'type=sha,prefix=sha-'
-          # Let's use the full SHA for more uniqueness if available, or latest for main branch.
-          if [ "${{ github.event_name }}" == "push" ] && [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            echo "IMAGE_TO_TEST=${{ env.IMAGE_NAME }}:latest" >> $GITHUB_ENV
-            echo "Testing ${{ env.IMAGE_NAME }}:latest"
-          else
-            # For PRs or other branches, use the SHA-based tag.
-            # The metadata action produces tags like 'type=sha,prefix=sha-'
-            echo "IMAGE_TO_TEST=${{ env.IMAGE_NAME }}:sha-${GITHUB_SHA::7}" >> $GITHUB_ENV
-            echo "Testing ${{ env.IMAGE_NAME }}:sha-${GITHUB_SHA::7}"
-            echo "Note: This assumes the 'build' job has made this image tag available for testing (e.g., via local Docker daemon or a shared registry)."
-            echo "If testing PRs where image is not pushed, consider 'docker load' from an artifact or ensure runner persistence."
-          fi
+      # Steps from the former 'test' job begin here
+      # The 'Checkout repository' step is already present above, so not repeated.
+      # The "Define image to test" step has been removed.
+      # Tests will use a tag from the 'meta' step output, specifically 'steps.meta.outputs.version'.
+      # This tag is one of the tags with which the image was built and loaded locally by build-push-action.
 
       - name: Run Docker container
         run: |
-          docker run -d --name test-container ${{ env.IMAGE_TO_TEST }}
-          echo "Container started with image: ${{ env.IMAGE_TO_TEST }}"
+          docker run -d --name test-container ${{ steps.meta.outputs.version }}
+          echo "Container started with image: ${{ steps.meta.outputs.version }}"
 
       - name: Wait for container initialization
         run: |
