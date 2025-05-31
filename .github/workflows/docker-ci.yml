@@ -53,7 +53,9 @@ jobs:
           context: .
           # Push is conditional: only on 'push' event to 'master' branch
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: |
+            ${{ steps.meta.outputs.tags }}
+            ${{ env.IMAGE_NAME }}:ci-test-image
           labels: ${{ steps.meta.outputs.labels }}
           # Outputs image digest and other info, useful if image is not pushed but needs to be loaded/used by a tag.
           # For example, if push is false, we might need to load the image into docker for testing.
@@ -69,8 +71,8 @@ jobs:
 
       - name: Run Docker container
         run: |
-          docker run -d --name test-container ${{ steps.docker_build.outputs.imageid }}
-          echo "Container started with image ID: ${{ steps.docker_build.outputs.imageid }}"
+          docker run -d --name test-container ${{ env.IMAGE_NAME }}:ci-test-image
+          echo "Container started with image: ${{ env.IMAGE_NAME }}:ci-test-image"
 
       - name: Wait for container to be healthy
         run: |
