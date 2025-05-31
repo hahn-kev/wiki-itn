@@ -2,13 +2,13 @@ name: Docker Build, Test, and Publish
 
 on:
   push:
-    branches: [ main ]
+    branches: [ master ]
   pull_request:
-    branches: [ main ]
+    branches: [ master ]
 
 env:
   # IMPORTANT: Please replace <OWNER> and <REPO_NAME> with your GitHub username/organization and repository name.
-  IMAGE_NAME: ghcr.io/<OWNER>/<REPO_NAME>
+  IMAGE_NAME: ghcr.io/hahn-kev/wiki-itn 
 
 jobs:
   build:
