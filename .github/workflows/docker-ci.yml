@@ -1,0 +1,145 @@
+name: Docker Build, Test, and Publish
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+env:
+  IMAGE_NAME: ghcr.io/hahn-kev/wiki-itn
+
+jobs:
+  build_and_test:
+    name: Build, Test, and Publish Docker Image
+    runs-on: ubuntu-latest
+    permissions: # Needed for pushing to GHCR
+      contents: read
+      packages: write
+      id-token: write # For OIDC if ever used with sigstore/cosign
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          # Tags for the final published image
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and Load Docker image for local testing
+        id: build_for_local_test
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true # Load image into local Docker daemon
+          push: false # Do not push this build
+          tags: ${{ env.IMAGE_NAME }}:ci-test-image # Specific tag for testing
+          labels: ${{ steps.meta.outputs.labels }} # Keep labels for consistency if needed
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Test steps using the locally built image
+      - name: Run Docker container
+        run: |
+          docker run -d --name test-container ${{ env.IMAGE_NAME }}:ci-test-image
+          echo "Container started with image: ${{ env.IMAGE_NAME }}:ci-test-image"
+
+      - name: Wait for container to be healthy
+        run: |
+          echo "Waiting for container to become healthy..."
+          timeout_seconds=90
+          interval_seconds=5
+          elapsed_seconds=0
+          while true; do
+            status=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}starting{{end}}' test-container 2>/dev/null || echo "inspect_failed")
+            if [ "$status" == "healthy" ]; then
+              echo "Container is healthy!"
+              break
+            fi
+            if [ "$status" == "inspect_failed" ] && [ $elapsed_seconds -lt 10 ]; then
+               echo "Inspect failed or container not found yet, waiting..."
+               sleep $interval_seconds
+               elapsed_seconds=$((elapsed_seconds + interval_seconds))
+               continue
+            elif [ "$status" == "inspect_failed" ]; then
+               echo "Error inspecting container or container exited unexpectedly."
+               docker ps -a
+               docker logs test-container || echo "Could not retrieve logs for test-container."
+               exit 1
+            fi
+            if [ $elapsed_seconds -ge $timeout_seconds ]; then
+              echo "Timeout waiting for container to become healthy. Last status: $status"
+              docker logs test-container || echo "Could not retrieve logs for test-container on timeout."
+              exit 1
+            fi
+            sleep $interval_seconds
+            elapsed_seconds=$((elapsed_seconds + interval_seconds))
+            echo "Current status: $status (elapsed: ${elapsed_seconds}s)"
+          done
+
+      - name: Manually trigger feed generation
+        run: |
+          echo "Manually triggering feed generation script..."
+          docker exec test-container /usr/local/bin/run_wiki_itn.sh
+          echo "Feed generation script executed."
+
+      - name: Wait for script execution and file creation
+        run: |
+          echo "Waiting for script to generate feed..."
+          sleep 10
+
+      - name: Check if feed.xml exists and is not empty
+        run: |
+          echo "Checking for feed.xml..."
+          docker exec test-container sh -c \
+            "if [ -s /var/www/html/feed.xml ]; then \
+              echo 'Test Passed: feed.xml exists and is not empty.'; \
+              echo 'feed.xml content:'; \
+              head /var/www/html/feed.xml; \
+              exit 0; \
+            else \
+              echo 'Test Failed: feed.xml does not exist or is empty.'; \
+              ls -l /var/www/html/; \
+              exit 1; \
+            fi"
+
+      - name: Stop and remove container
+        if: always() # Ensure cleanup even if previous steps fail
+        run: |
+          echo "Cleaning up container..."
+          docker logs test-container || echo "Failed to get logs, container might not have started."
+          docker stop test-container || echo "Failed to stop container."
+          docker rm test-container || echo "Failed to remove container."
+
+      # Conditional Push step (only on success of tests and specific branch/event)
+      - name: Build and Push to GHCR
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }} # Use original tags from metadata for publishing
+          labels: ${{ steps.meta.outputs.labels }} # Use original labels from metadata for publishing
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
