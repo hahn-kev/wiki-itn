@@ -47,7 +47,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
-        id: build_push # Added id to reference outputs if needed later
+        id: docker_build # Changed id to docker_build
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -69,13 +69,48 @@ jobs:
 
       - name: Run Docker container
         run: |
-          docker run -d --name test-container ${{ steps.meta.outputs.version }}
-          echo "Container started with image: ${{ steps.meta.outputs.version }}"
+          docker run -d --name test-container ${{ steps.docker_build.outputs.imageid }}
+          echo "Container started with image ID: ${{ steps.docker_build.outputs.imageid }}"
 
-      - name: Wait for container initialization
+      - name: Wait for container to be healthy
         run: |
-          echo "Waiting for container to initialize..."
-          sleep 30 # Allow Nginx, cron to start, and entrypoint to settle
+          echo "Waiting for container to become healthy..."
+          timeout_seconds=90
+          interval_seconds=5
+          elapsed_seconds=0
+          while true; do
+            # Query health status, redirect stderr to /dev/null to suppress errors if container isn't ready
+            # Default to "inspect_failed" if .State.Health is missing or inspect command fails
+            status=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}starting{{end}}' test-container 2>/dev/null || echo "inspect_failed")
+
+            if [ "$status" == "healthy" ]; then
+              echo "Container is healthy!"
+              break
+            fi
+
+            # Initial check might fail if container is not yet created, give it a moment
+            if [ "$status" == "inspect_failed" ] && [ $elapsed_seconds -lt 10 ]; then # Only wait for inspect_failed briefly at the very start
+               echo "Inspect failed or container not found yet, waiting..."
+               sleep $interval_seconds
+               elapsed_seconds=$((elapsed_seconds + interval_seconds))
+               continue
+            elif [ "$status" == "inspect_failed" ]; then # If inspect continues to fail after initial period
+               echo "Error inspecting container or container exited unexpectedly."
+               docker ps -a # Show all containers for debugging
+               docker logs test-container || echo "Could not retrieve logs for test-container."
+               exit 1
+            fi
+
+            if [ $elapsed_seconds -ge $timeout_seconds ]; then
+              echo "Timeout waiting for container to become healthy. Last status: $status"
+              docker logs test-container || echo "Could not retrieve logs for test-container on timeout."
+              exit 1
+            fi
+
+            sleep $interval_seconds
+            elapsed_seconds=$((elapsed_seconds + interval_seconds))
+            echo "Current status: $status (elapsed: ${elapsed_seconds}s)"
+          done
 
       - name: Manually trigger feed generation
         run: |

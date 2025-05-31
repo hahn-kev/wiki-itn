@@ -43,6 +43,8 @@ RUN chmod +x /usr/local/bin/run_wiki_itn.sh /usr/local/bin/entrypoint.sh
 
 COPY nginx-site.conf /etc/nginx/conf.d/default.conf
 
+HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=5 CMD curl -f http://localhost/feed.xml || curl -f http://localhost/ || exit 1
+
 # Expose port 80 for Nginx
 EXPOSE 80
 
