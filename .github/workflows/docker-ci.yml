@@ -40,35 +40,26 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE_NAME }}
+          # Tags for the final published image
           tags: |
             type=ref,event=branch
             type=ref,event=pr
             type=sha,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push Docker image
-        id: docker_build # Changed id to docker_build
+      - name: Build and Load Docker image for local testing
+        id: build_for_local_test
         uses: docker/build-push-action@v5
         with:
           context: .
-          # Push is conditional: only on 'push' event to 'master' branch
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
-          tags: |
-            ${{ steps.meta.outputs.tags }}
-            ${{ env.IMAGE_NAME }}:ci-test-image
-          labels: ${{ steps.meta.outputs.labels }}
-          # Outputs image digest and other info, useful if image is not pushed but needs to be loaded/used by a tag.
-          # For example, if push is false, we might need to load the image into docker for testing.
-          # build-push-action v5 automatically loads the image into the local Docker daemon if not pushed.
+          load: true # Load image into local Docker daemon
+          push: false # Do not push this build
+          tags: ${{ env.IMAGE_NAME }}:ci-test-image # Specific tag for testing
+          labels: ${{ steps.meta.outputs.labels }} # Keep labels for consistency if needed
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Steps from the former 'test' job begin here
-      # The 'Checkout repository' step is already present above, so not repeated.
-      # The "Define image to test" step has been removed.
-      # Tests will use a tag from the 'meta' step output, specifically 'steps.meta.outputs.version'.
-      # This tag is one of the tags with which the image was built and loaded locally by build-push-action.
-
+      # Test steps using the locally built image
       - name: Run Docker container
         run: |
           docker run -d --name test-container ${{ env.IMAGE_NAME }}:ci-test-image
@@ -81,34 +72,27 @@ jobs:
           interval_seconds=5
           elapsed_seconds=0
           while true; do
-            # Query health status, redirect stderr to /dev/null to suppress errors if container isn't ready
-            # Default to "inspect_failed" if .State.Health is missing or inspect command fails
             status=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}starting{{end}}' test-container 2>/dev/null || echo "inspect_failed")
-
             if [ "$status" == "healthy" ]; then
               echo "Container is healthy!"
               break
             fi
-
-            # Initial check might fail if container is not yet created, give it a moment
-            if [ "$status" == "inspect_failed" ] && [ $elapsed_seconds -lt 10 ]; then # Only wait for inspect_failed briefly at the very start
+            if [ "$status" == "inspect_failed" ] && [ $elapsed_seconds -lt 10 ]; then
                echo "Inspect failed or container not found yet, waiting..."
                sleep $interval_seconds
                elapsed_seconds=$((elapsed_seconds + interval_seconds))
                continue
-            elif [ "$status" == "inspect_failed" ]; then # If inspect continues to fail after initial period
+            elif [ "$status" == "inspect_failed" ]; then
                echo "Error inspecting container or container exited unexpectedly."
-               docker ps -a # Show all containers for debugging
+               docker ps -a
                docker logs test-container || echo "Could not retrieve logs for test-container."
                exit 1
             fi
-
             if [ $elapsed_seconds -ge $timeout_seconds ]; then
               echo "Timeout waiting for container to become healthy. Last status: $status"
               docker logs test-container || echo "Could not retrieve logs for test-container on timeout."
               exit 1
             fi
-
             sleep $interval_seconds
             elapsed_seconds=$((elapsed_seconds + interval_seconds))
             echo "Current status: $status (elapsed: ${elapsed_seconds}s)"
@@ -147,3 +131,15 @@ jobs:
           docker logs test-container || echo "Failed to get logs, container might not have started."
           docker stop test-container || echo "Failed to stop container."
           docker rm test-container || echo "Failed to remove container."
+
+      # Conditional Push step (only on success of tests and specific branch/event)
+      - name: Build and Push to GHCR
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }} # Use original tags from metadata for publishing
+          labels: ${{ steps.meta.outputs.labels }} # Use original labels from metadata for publishing
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
