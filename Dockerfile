@@ -7,12 +7,14 @@ WORKDIR /usr/src/wiki-itn
 RUN apt-get update && apt-get install -y cron curl && rm -rf /var/lib/apt/lists/*
 
 # Copy Cargo files and build dummy project to cache dependencies
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml ./
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 RUN cargo build --release
 
 # Copy actual source code and build
 COPY src ./src
+RUN cargo test
+RUN cat feed.xml || echo "feed.xml not found or empty after test"
 RUN rm -f target/release/deps/wiki_itn* # Remove previous build artifacts
 RUN cargo build --release
 
