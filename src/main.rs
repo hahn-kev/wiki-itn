@@ -32,7 +32,7 @@ pub fn process_html(html_content: &str) -> String {
                     list.push(news_item);
                 } else {
                     // Optionally log skipped item
-                    println!("Skipping_li_item_due_to_parsing_issue: {}", element_children_to_string(e));
+                    eprintln!("Skipping_li_item_due_to_parsing_issue: {}", element_children_to_string(e));
                 }
             }
             _ => ()
