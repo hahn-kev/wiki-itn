@@ -9,3 +9,7 @@ edition = "2018"
 [dependencies]
 html_parser = "0.6.2"
 chrono = "0.4.19"
+
+[lib]
+path = "src/main.rs"
+name = "wiki_itn"

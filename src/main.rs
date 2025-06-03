@@ -11,27 +11,35 @@ use news_item::NewsItem;
 mod news_item;
 
 fn main() {
-    process();
+    let mut piped_in_value = String::new();
+    stdin().read_to_string(&mut piped_in_value).expect("Value of ITN page must be piped in");
+    let feed_xml = process_html(&piped_in_value); // Call the new function
+    print!("{}", feed_xml); // Print the result
 }
 
 const URL_PREFIX: &str = "https://en.wikipedia.org";
 const FEED_URL: &str = "https://en.wikipedia.org/wiki/Template:In_the_news";
 
 // expecting value from: https://en.wikipedia.org/wiki/Template:In_the_news
-fn process() {
-    let mut piped_in_value = String::new();
-    stdin().read_to_string(&mut piped_in_value).expect("Value of ITN page must be piped in");
-    let dom = Dom::parse(piped_in_value.as_str()).expect("Failed to parse document");
+pub fn process_html(html_content: &str) -> String {
+    let dom = Dom::parse(html_content).expect("Failed to parse document");
     let root_element = find_root_element(&dom).expect("Unable to find root element ul");
-    let mut list: Vec<NewsItem> = Vec::with_capacity(root_element.children.len());
+    let mut list: Vec<NewsItem> = Vec::new(); // Initialize as empty
     for node in &root_element.children {
         match node {
-            Node::Element(e) if e.name == "li" => list.push(element_to_news_item(e)),
+            Node::Element(e) if e.name == "li" => {
+                if let Some(news_item) = element_to_news_item(e) {
+                    list.push(news_item);
+                } else {
+                    // Optionally log skipped item
+                    println!("Skipping_li_item_due_to_parsing_issue: {}", element_children_to_string(e));
+                }
+            }
             _ => ()
         }
     }
     let feed_text = write_atom_feed(list);
-    print!("{}", feed_text);
+    feed_text // Return the feed text instead of printing
 }
 
 fn write_atom_feed(list: Vec<NewsItem>) -> String {
@@ -64,26 +72,29 @@ fn write_atom_feed(list: Vec<NewsItem>) -> String {
 }
 
 
-fn element_to_news_item(e: &Element) -> NewsItem {
-    let bold_element = find_element(&e.children, "b").expect("unable to find bold link");
-    let first_node = bold_element.children.first();
-    let link_element = (match first_node {
-        Some(Node::Element(e)) if e.name == "a" => Some(e),
-        _ => None
-    }).expect("bold element is empty");
-    let mut link = link_element.attributes.get("href").expect("link should have href")
-        .as_ref().expect("href should not be empty").clone();
-    let title = link_element.attributes.get("title").expect("link should have title")
-        .as_ref().expect("title should not be empty").clone();
+fn element_to_news_item(e: &Element) -> Option<NewsItem> {
+    let bold_element = find_element(&e.children, "b")?;
+    let first_node = bold_element.children.first()?;
+    let link_element = match first_node {
+        Node::Element(el) if el.name == "a" => Some(el),
+        _ => None,
+    }?;
+
+    // Ensure attributes exist and have values
+    let href_opt = link_element.attributes.get("href")?.as_ref()?;
+    let title_opt = link_element.attributes.get("title")?.as_ref()?;
+
+    let mut link = href_opt.clone();
+    let title = title_opt.clone();
     let id = link.clone();
     link.insert_str(0, URL_PREFIX);
 
-    NewsItem {
+    Some(NewsItem {
         title,
         body: element_children_to_string(e),
         url: link,
         id,
-    }
+    })
 }
 
 fn element_children_to_string(e: &Element) -> String {
@@ -117,14 +128,12 @@ fn attributes_to_string(attr: &HashMap<String, Option<String>>) -> String {
 }
 
 fn find_root_element(dom: &Dom) -> Option<&Element> {
-    let body_content = find_element_with_id(&dom.children, "div", "bodyContent")
-        .expect("unable to find div id='bodyContent'");
-    let div = find_element_with_class(&body_content.children, "div", &"mw-parser-output".to_string())
-        .expect("unable to find div class='mw-parser-output'");
-    for node in &div.children {
+    let content_text_div = find_element_with_id(&dom.children, "div", "mw-content-text")?;
+    let parser_output_div = find_element_with_class(&content_text_div.children, "div", &"mw-parser-output".to_string())?;
+    for node in &parser_output_div.children {
         match node {
             Node::Element(e) if e.name == "ul" => return Some(e),
-            _ => continue
+            _ => continue,
         }
     }
     None
