@@ -71,7 +71,6 @@ fn write_atom_feed(list: Vec<NewsItem>) -> String {
 "##);
 }
 
-
 fn element_to_news_item(e: &Element) -> Option<NewsItem> {
     let bold_element = find_element(&e.children, "b")?;
     let first_node = bold_element.children.first()?;
@@ -98,17 +97,29 @@ fn element_to_news_item(e: &Element) -> Option<NewsItem> {
 }
 
 fn element_children_to_string(e: &Element) -> String {
-    let mut str = String::new();
+    // Render each child node into a string fragment first
+    let mut parts: Vec<String> = Vec::new();
     for node in &e.children {
         match node {
-            Node::Text(t) => { str.push_str(t) }
-            Node::Element(e) => {
-                str.push_str(&element_to_string(e))
-            }
+            Node::Text(t) => parts.push(t.clone()),
+            Node::Element(el) => parts.push(element_to_string(el)),
             _ => {}
         }
     }
-    str
+
+    // Join fragments, inserting a single space when neither side has whitespace
+    let mut out = String::new();
+    for part in parts {
+        let out_ends_ws = out.chars().last().map(|c| c.is_whitespace()).unwrap_or(false);
+        let part_starts_ws = part.chars().next().map(|c| c.is_whitespace()).unwrap_or(false);
+
+        if !out.is_empty() && !out_ends_ws && !part_starts_ws {
+            out.push(' ');
+        }
+        out.push_str(&part);
+    }
+
+    out
 }
 
 fn element_to_string(e: &Element) -> String {
