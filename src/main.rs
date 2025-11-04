@@ -51,12 +51,12 @@ fn write_atom_feed(list: Vec<NewsItem>) -> String {
         let time = time.to_rfc3339_opts(SecondsFormat::Secs, true);
         entries.push_str(&format!(r#"
     <entry>
-        <title>{{title}}</title>
-        <link href="{{url}}"/>
-        <id>{{id}}</id>
-        <published>{{time}}</published>
-        <updated>{{time}}</updated>
-        <content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml">{{body}}</div></content>
+        <title>{title}</title>
+        <link href="{url}"/>
+        <id>{id}</id>
+        <published>{time}</published>
+        <updated>{time}</updated>
+        <content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml">{body}</div></content>
     </entry>"#));
     }
 
@@ -64,9 +64,9 @@ fn write_atom_feed(list: Vec<NewsItem>) -> String {
     return format!(r##"<?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
     <title>Wikipedia In The News</title>
-    <link href="{{FEED_URL}}"/>
+    <link href="{FEED_URL}"/>
     <id>urn:uuid:e0579856-2b18-4a8e-8c76-771c24206362</id>
-    <updated>{{time}}</updated>{{entries}}
+    <updated>{time}</updated>{entries}
 </feed>
 "##);
 }
@@ -123,7 +123,7 @@ fn element_children_to_string(e: &Element) -> String {
 }
 
 fn element_to_string(e: &Element) -> String {
-    format!("<{{}}{}>{{}}</{{}}>", e.name, attributes_to_string(&e.attributes), element_children_to_string(e))
+    format!("<{}{}>{}</{0}>", e.name, attributes_to_string(&e.attributes), element_children_to_string(e))
 }
 
 fn attributes_to_string(attr: &HashMap<String, Option<String>>) -> String {
