@@ -11,17 +11,19 @@ COPY Cargo.toml ./
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 RUN cargo build --release
 
-# Copy actual source code and build
+# Copy actual source code and tests, then build
 COPY src ./src
+COPY tests ./tests
 RUN cargo test
 RUN cat feed.xml || echo "feed.xml not found or empty after test"
 RUN rm -f target/release/deps/wiki_itn* # Remove previous build artifacts
 RUN cargo build --release
 
-# Copy scripts
+# Copy scripts and normalize CRLF from Windows checkouts
 COPY run_wiki_itn.sh /usr/local/bin/run_wiki_itn.sh
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/run_wiki_itn.sh /usr/local/bin/entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/run_wiki_itn.sh /usr/local/bin/entrypoint.sh \
+    && chmod +x /usr/local/bin/run_wiki_itn.sh /usr/local/bin/entrypoint.sh
 
 # Stage 2: Final image with Nginx
 FROM nginx:latest
@@ -32,18 +34,18 @@ RUN apt-get update && apt-get install -y cron curl && rm -rf /var/lib/apt/lists/
 # Copy compiled binary from builder stage
 COPY --from=builder /usr/src/wiki-itn/target/release/wiki-itn /usr/local/bin/wiki-itn
 
-# Copy scripts
+# Copy scripts and normalize CRLF from Windows checkouts
 COPY run_wiki_itn.sh /usr/local/bin/run_wiki_itn.sh
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/run_wiki_itn.sh /usr/local/bin/entrypoint.sh \
+    && chmod +x /usr/local/bin/run_wiki_itn.sh /usr/local/bin/entrypoint.sh
 
 # Nginx configuration will be copied in a later step.
 # For now, create the directory where Nginx will serve files.
 RUN mkdir -p /var/www/html
 
-# Ensure scripts are executable (permissions might be lost during copy)
-RUN chmod +x /usr/local/bin/run_wiki_itn.sh /usr/local/bin/entrypoint.sh
-
 COPY nginx-site.conf /etc/nginx/conf.d/default.conf
+RUN sed -i 's/\r$//' /etc/nginx/conf.d/default.conf
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=5 CMD curl -f http://localhost/nginx_health || exit 1
 

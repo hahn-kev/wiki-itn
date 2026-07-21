@@ -83,17 +83,27 @@ fn element_to_news_item(e: &Element) -> Option<NewsItem> {
     let href_opt = link_element.attributes.get("href")?.as_ref()?;
     let title_opt = link_element.attributes.get("title")?.as_ref()?;
 
-    let mut link = href_opt.clone();
     let title = title_opt.clone();
-    let id = link.clone();
-    link.insert_str(0, URL_PREFIX);
+    let id = href_opt.clone();
+    let url = normalize_wiki_url(href_opt);
 
     Some(NewsItem {
         title,
         body: element_children_to_string(e),
-        url: link,
+        url,
         id,
     })
+}
+
+/// Wikipedia may emit relative (`/wiki/...`) or absolute article URLs.
+fn normalize_wiki_url(href: &str) -> String {
+    if href.starts_with("https://") || href.starts_with("http://") {
+        href.to_string()
+    } else if href.starts_with("//") {
+        format!("https:{href}")
+    } else {
+        format!("{URL_PREFIX}{href}")
+    }
 }
 
 fn element_children_to_string(e: &Element) -> String {
@@ -130,7 +140,7 @@ fn attributes_to_string(attr: &HashMap<String, Option<String>>) -> String {
     let mut str = String::new();
     attr.iter().for_each(|(name, value)| {
         str.push_str(&match value {
-            Some(value) if name == "href" => format!(" {}=\"{}{}\"", name, URL_PREFIX, value),
+            Some(value) if name == "href" => format!(" {}=\"{}\"", name, normalize_wiki_url(value)),
             Some(value) => format!(" {}=\"{}\"", name, value),
             None => format!(" {}", name)
         })
@@ -140,14 +150,39 @@ fn attributes_to_string(attr: &HashMap<String, Option<String>>) -> String {
 
 fn find_root_element(dom: &Dom) -> Option<&Element> {
     let content_text_div = find_element_with_id(&dom.children, "div", "mw-content-text")?;
-    let parser_output_div = find_element_with_class(&content_text_div.children, "div", &"mw-parser-output".to_string())?;
-    for node in &parser_output_div.children {
-        match node {
-            Node::Element(e) if e.name == "ul" => return Some(e),
-            _ => continue,
+    let parser_output_div = find_element_with_class(
+        &content_text_div.children,
+        "div",
+        &"mw-parser-output".to_string(),
+    )?;
+    // Prefer the ITN story list (li with bold title link). Parsoid nests this
+    // ul under <section>; older markup had it as a direct child.
+    find_itn_story_list(&parser_output_div.children)
+}
+
+/// Find a `ul` whose items look like ITN stories (`li` → `b` → `a`).
+fn find_itn_story_list(children: &[Node]) -> Option<&Element> {
+    for node in children {
+        if let Node::Element(e) = node {
+            if e.name == "ul" && ul_has_bold_title_items(e) {
+                return Some(e);
+            }
+            if let Some(found) = find_itn_story_list(&e.children) {
+                return Some(found);
+            }
         }
     }
     None
+}
+
+fn ul_has_bold_title_items(ul: &Element) -> bool {
+    ul.children.iter().any(|node| {
+        if let Node::Element(li) = node {
+            li.name == "li" && element_to_news_item(li).is_some()
+        } else {
+            false
+        }
+    })
 }
 
 #[allow(clippy::ptr_arg)]
